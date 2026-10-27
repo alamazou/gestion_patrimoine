@@ -52,56 +52,36 @@ def archive_2004_2013():
             time.sleep(0.07)
 
 def recent_2013_present():
-    print('\n=== Archive récente CBOE : recherche des liens CSV ===')
-    # Les listes 2013+ sont souvent chargées dynamiquement : on utilise un navigateur.
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print('Installer playwright : pip install playwright ; python -m playwright install chromium')
-        return
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(RECENT, wait_until='domcontentloaded', timeout=60000)
-        page.wait_for_timeout(2000)
-        # Détecter les sélecteurs de produit et d'année sans supposer leurs identifiants.
-        selects = page.locator('select')
-        print('Sélecteurs trouvés :', selects.count())
-        for i in range(selects.count()):
-            opts = selects.nth(i).locator('option').all_text_contents()
-            print('  Sélecteur', i, ':', [x.strip() for x in opts[:8]])
-        urls = set()
-        def harvest():
-            for a in page.locator('a[href]').all():
-                href = a.get_attribute('href') or ''
-                if '.csv' in href.lower() and ('vx' in href.lower() or 'vxt' in href.lower()):
-                    urls.add(urljoin(RECENT, href))
-        harvest()
-        # Parcourir les sélecteurs d'année contenant des années 2013+.
-        for i in range(selects.count()):
-            options = selects.nth(i).locator('option')
-            values = []
-            for j in range(options.count()):
-                opt = options.nth(j)
-                label = (opt.text_content() or '').strip()
-                value = opt.get_attribute('value') or ''
-                if re.search(r'20(1[3-9]|2[0-9])', label + ' ' + value):
-                    values.append(value)
-            for value in dict.fromkeys(values):
-                try:
-                    selects.nth(i).select_option(value=value)
-                    page.wait_for_timeout(450)
-                    harvest()
-                except Exception as exc:
-                    print('  Sélection ignorée :', value, str(exc)[:70])
-        browser.close()
-    print('Fichiers CSV récents détectés :', len(urls))
-    for url in sorted(urls):
-        save(url)
-        time.sleep(0.1)
-    if not urls:
-        print('ATTENTION : liens récents non détectés automatiquement. ')
-        print('Téléchargement manuel possible :', RECENT)
+    """Parcourt les échéances mensuelles VX, URL CBOE confirmée par l'utilisateur."""
+    from datetime import date, timedelta
+    print('\\n=== Contrats VX 2014-2026 ===')
+    base = 'https://cdn.cboe.com/data/us/futures/market_statistics/historical_data/VX/'
+    today = date.today()
+    for year in range(2014, today.year + 1):
+        successes = 0
+        for month in range(1, 13):
+            if date(year, month, 1) > today:
+                break
+            # Règle standard : 30 jours avant le 3e vendredi du mois suivant.
+            ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+            first = date(ny, nm, 1)
+            third_friday = first + timedelta(days=(4 - first.weekday()) % 7 + 14)
+            expiry = third_friday - timedelta(days=30)
+            # Les jours fériés peuvent avancer l'échéance d'un jour.
+            candidates = [expiry, expiry - timedelta(days=1),
+                          expiry - timedelta(days=2)]
+            for candidate in candidates:
+                target = ROOT / f'VX_{candidate.isoformat()}.csv'
+                if target.exists() and target.stat().st_size > 100:
+                    successes += 1
+                    break
+                url = base + target.name
+                if save(url):
+                    successes += 1
+                    break
+            time.sleep(0.06)
+        print(f'Année {year}: {successes} échéances mensuelles récupérées')
+    print('Les contrats hebdomadaires ne sont pas inclus.')
 
 def inventory():
     files = sorted(ROOT.glob('*.csv'))
