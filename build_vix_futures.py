@@ -49,7 +49,7 @@ def read_cboe_csv(path):
         valid.append(line)
     if rejected:
         print(f"{path.name}: {len(rejected)} lignes rejetees")
-    return pd.read_csv(StringIO("\\n".join(valid))), rejected
+    return pd.read_csv(StringIO("\n".join(valid))), rejected
 
 
 def estimated_expiry(year, month):
@@ -120,6 +120,10 @@ def main():
     expiry = front.pivot(index="Date", columns="Tenor", values="Expiry")
     expiry = expiry.rename(columns=lambda n: f"VX{n}_Expiry")
     result = prices.join(expiry)
+    for i in range(1, MIN_TENORS + 1):
+        if f"VX{i}" not in result.columns:
+            result[f"VX{i}"] = float("nan")
+            result[f"VX{i}_Expiry"] = pd.NaT
     result["Available_Contracts"] = long.groupby("Date").size()
     for i in range(1, MIN_TENORS):
         result[f"VX{i+1}_minus_VX{i}"] = result[f"VX{i+1}"] - result[f"VX{i}"]
