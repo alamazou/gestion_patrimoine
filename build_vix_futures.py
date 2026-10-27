@@ -86,6 +86,12 @@ def read_contract(path):
                         "Expiry": pd.Series(expiry, index=frame.index, dtype="datetime64[ns]"),
                         "Settle": values, "Source": path.name})
     out = out.dropna(subset=["Date", "Settle"])
+    # Older CFE archives show 133.30 on 2007-03-23 versus 13.38
+    # on 2007-03-26 across contracts: normalize pre-change units.
+    # Raw input files are not altered.
+    if old:
+        mask = out["Date"] < pd.Timestamp("2007-03-26")
+        out.loc[mask, "Settle"] = out.loc[mask, "Settle"] / 10.0
     out = out[(out["Settle"] > 0) & (out["Date"] < expiry)]
     out["Expiry"] = pd.to_datetime(out["Expiry"], errors="coerce").astype("datetime64[ns]")
     return out, rejected
@@ -130,6 +136,10 @@ def main():
     result["VX2_div_VX1_minus_1"] = result["VX2"] / result["VX1"] - 1
     result["VX1_Change_5D"] = result["VX1"].diff(5)
     result["VX1_Change_20D"] = result["VX1"].diff(20)
+    # Only compare equal-expiry contracts over the entire horizon.
+    for horizon in (5, 20):
+        same = result["VX1_Expiry"].eq(result["VX1_Expiry"].shift(horizon))
+        result[f"VX1_SameContract_Change_{horizon}D"] = result["VX1"].diff(horizon).where(same)
     result.index.name = "Date"
     result.to_csv(ROOT / "VIX_FUTURES_HISTORIQUE.csv", date_format="%Y-%m-%d")
     qa = result.groupby(result.index.year).agg(
