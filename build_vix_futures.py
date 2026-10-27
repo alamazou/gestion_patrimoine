@@ -29,8 +29,8 @@ def column(frame, *candidates):
 
 def read_contract(path):
     # 2014+: VX_YYYY-MM-DD.csv; 2004-2013: CFE_F13_VX.csv
-    recent = re.fullmatch(r"VX_(\\d{4}-\\d{2}-\\d{2})", path.stem)
-    old = re.fullmatch(r"CFE_([FGHJKMNQUVXZ])(\\d{2})_VX", path.stem)
+    recent = re.fullmatch(r"VX_([0-9]{4}-[0-9]{2}-[0-9]{2})", path.stem)
+    old = re.fullmatch(r"CFE_([FGHJKMNQUVXZ])([0-9]{2})_VX", path.stem)
     if not (recent or old):
         return None
     if recent:
