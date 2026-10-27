@@ -8,6 +8,8 @@ Sorties: vix_futures_cboe/VIX_FUTURES_HISTORIQUE.csv
 """
 from pathlib import Path
 import re
+from io import StringIO
+from datetime import date, timedelta
 import pandas as pd
 
 ROOT = Path("vix_futures_cboe")
@@ -27,6 +29,36 @@ def column(frame, *candidates):
     raise ValueError(f"Colonnes attendues {candidates}; colonnes reçues: {list(frame.columns)}")
 
 
+def read_cboe_csv(path):
+    lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    start = next((i for i, line in enumerate(lines)
+                  if "trade date" in line.lower() or line.lower().startswith("date,")
+                  or line.lower().startswith("trade date,")), None)
+    if start is None:
+        raise ValueError("En-tete date introuvable")
+    header = lines[start]
+    ncols = len(header.split(","))
+    valid = [header]
+    rejected = []
+    for lineno, line in enumerate(lines[start + 1:], start + 2):
+        if not line.strip():
+            continue
+        if len(line.split(",")) != ncols:
+            rejected.append(lineno)
+            continue
+        valid.append(line)
+    if rejected:
+        print(f"{path.name}: {len(rejected)} lignes rejetees")
+    return pd.read_csv(StringIO("\\n".join(valid))), rejected
+
+
+def estimated_expiry(year, month):
+    ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+    first = date(ny, nm, 1)
+    third_friday = first + timedelta(days=(4 - first.weekday()) % 7 + 14)
+    return pd.Timestamp(third_friday - timedelta(days=30))
+
+
 def read_contract(path):
     # 2014+: VX_YYYY-MM-DD.csv; 2004-2013: CFE_F13_VX.csv
     recent = re.fullmatch(r"VX_([0-9]{4}-[0-9]{2}-[0-9]{2})", path.stem)
@@ -41,8 +73,9 @@ def read_contract(path):
         # Avant 2014, le nom donne le mois contractuel, pas la date
         # d'expiration exacte. Pour le classement, utiliser le 1er du mois
         # puis exclure les lignes après le dernier jour observé du contrat.
-        expiry = pd.Timestamp(year, month, 1) + pd.offsets.MonthEnd(0)
-    frame = clean_columns(pd.read_csv(path, low_memory=False))
+        expiry = estimated_expiry(year, month)
+    raw, rejected = read_cboe_csv(path)
+    frame = clean_columns(raw)
     date_col = column(frame, "tradedate", "date")
     settle_col = column(frame, "settle", "settlement", "settlementprice")
     dates = pd.to_datetime(frame[date_col], errors="coerce")
@@ -55,17 +88,19 @@ def read_contract(path):
     out = out.dropna(subset=["Date", "Settle"])
     out = out[(out["Settle"] > 0) & (out["Date"] < expiry)]
     out["Expiry"] = pd.to_datetime(out["Expiry"], errors="coerce").astype("datetime64[ns]")
-    return out
+    return out, rejected
 
 
 def main():
     files = sorted(ROOT.glob("*.csv"))
-    frames, errors = [], []
+    frames, errors, rejected_rows = [], [], []
     for path in files:
         try:
             part = read_contract(path)
             if part is not None:
-                frames.append(part)
+                frame, rejected = part
+                frames.append(frame)
+                rejected_rows.extend({'file': path.name, 'line': line} for line in rejected)
         except Exception as exc:
             errors.append({"file": path.name, "error": str(exc)})
     if not frames:
@@ -100,9 +135,13 @@ def main():
         Max_contracts=("Available_Contracts", "max"))
     qa["Coverage_4_contracts_pct"] = (100 * qa["Days_with_4_contracts"] / qa["Days"]).round(1)
     qa.to_csv(ROOT / "VIX_FUTURES_QA.csv")
+    if rejected_rows:
+        pd.DataFrame(rejected_rows).to_csv(ROOT / 'VIX_FUTURES_REJECTED_ROWS.csv', index=False)
     if errors:
         pd.DataFrame(errors).to_csv(ROOT / "VIX_FUTURES_PARSE_ERRORS.csv", index=False)
         print("Fichiers non lus :", len(errors), "(voir VIX_FUTURES_PARSE_ERRORS.csv)")
+    if not errors:
+        (ROOT / "VIX_FUTURES_PARSE_ERRORS.csv").unlink(missing_ok=True)
     print("Période :", result.index.min().date(), "→", result.index.max().date())
     print("Séances :", len(result), "; avec VX1–VX4 :", result["VX4"].notna().sum())
     print(qa.to_string())
