@@ -43,6 +43,15 @@ for i in range(1,4):
     spread=b-a
     for dt in df.index[(spread.abs()>25).fillna(False)]:
         flag(dt,f"VX{i+1}-VX{i}","EXTREME_CURVE_SPREAD",spread.loc[dt],25)
+# Critical historical issues: flag all four tenors on 2007-03-26;
+# the anomalous values should not silently enter model training.
+for dt in pd.to_datetime(["2007-03-26", "2006-06-13", "2006-06-14", "2006-06-15"]):
+    if dt in df.index:
+        for i in range(1,5):
+            value=df.at[dt,f"VX{i}"]
+            if pd.notna(value):
+                flag(dt,f"VX{i}","HISTORICAL_DATA_REVIEW",value,float("nan"),
+                     "Suspected historical quotation scale / contract data; verify raw CBOE")
 out=pd.DataFrame(flags,columns=["Date","Series","Anomaly","Value","Threshold","Detail"])
 out.to_csv(ROOT/"VIX_FUTURES_ANOMALIES.csv",index=False)
 summary=out.groupby(["Series","Anomaly"]).size().rename("Count").reset_index() if len(out) else pd.DataFrame(columns=["Series","Anomaly","Count"])
