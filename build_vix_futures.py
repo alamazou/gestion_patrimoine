@@ -49,10 +49,12 @@ def read_contract(path):
     values = pd.to_numeric(frame[settle_col], errors="coerce")
     # Les derniers settlements sont parfois publiés sur le jour d'expiration:
     # on les conserve pour le diagnostic, mais pas dans la courbe négociable.
-    out = pd.DataFrame({"Date": dates.dt.normalize(), "Expiry": expiry,
+    out = pd.DataFrame({"Date": dates.dt.normalize(),
+                        "Expiry": pd.Series(expiry, index=frame.index, dtype="datetime64[ns]"),
                         "Settle": values, "Source": path.name})
     out = out.dropna(subset=["Date", "Settle"])
     out = out[(out["Settle"] > 0) & (out["Date"] < expiry)]
+    out["Expiry"] = pd.to_datetime(out["Expiry"], errors="coerce").astype("datetime64[ns]")
     return out
 
 
